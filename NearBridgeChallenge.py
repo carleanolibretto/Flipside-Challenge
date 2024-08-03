@@ -35,6 +35,7 @@ def render_content(tab):
         return render_deep_dive()
 
 def render_overview():
+    df.columns = df.columns.str.lower()
     total_volume = df['amount_usd'].sum()
     volume_over_time = px.line(df, x='block_timestamp', y='amount_usd', title='Bridging Volume Over Time')
     inbound_outbound = df.groupby('direction')['amount_usd'].sum().reset_index()
