@@ -4,7 +4,7 @@ import plotly.express as px
 import pandas as pd
 
 # Load the data
-df = pd.read_excel("C:\\Users\\Carleano Libretto\\Downloads\\Flipside Take Home\\data.xlsx")
+df = pd.read_excel("data.xlsx")
 # Initialize the Dash app
 app = Dash(__name__, external_stylesheets=[dbc.themes.LUX])
 
