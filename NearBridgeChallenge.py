@@ -3,6 +3,7 @@ import dash_bootstrap_components as dbc
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
+from dash_bootstrap_templates import load_figure_template
 
 # Load the data
 df = pd.read_excel("NEAR_01012024_07282024_data.xlsx")
@@ -22,19 +23,25 @@ program_data = df[(df['block_timestamp'] >= program_start_date) & (df['block_tim
 before_program_data = df[df['block_timestamp'] < program_start_date]
 after_program_data = df[df['block_timestamp'] > program_end_date]
 
+# Calculate daily volume for the program period
+daily_volume_program = program_data.groupby('date')['amount_usd'].sum().reset_index()
+
 # Initialize the Dash app
-app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
+load_figure_template('morph')
+app = Dash(__name__, external_stylesheets=[dbc.themes.MORPH])
 
 # Define the layout of the dashboard
 app.layout = dbc.Container([
     dbc.Row([
-        dbc.Col(html.H1("Grail Program 2024 Analytics Dashboard", className="text-center mb-4"), width=12)
+        dbc.Col(html.H1("Grail Program 2024 Analytics Dashboard", className="text-center mb-4", style={"color": "#000"}), width=12)
     ]),
-    dbc.Tabs([
-        dbc.Tab(label='Overview', tab_id='tab-overview'),
-        dbc.Tab(label='User Behavior', tab_id='tab-user-behavior'),
-        dbc.Tab(label='Grail Program Impact', tab_id='tab-grail-impact'),
-    ], id='tabs', active_tab='tab-overview', className="mb-4"),
+    dbc.Row([
+        dbc.Col(dbc.Tabs([
+            dbc.Tab(label='Overview', tab_id='tab-overview'),
+            dbc.Tab(label='User Behavior', tab_id='tab-user-behavior'),
+            dbc.Tab(label='Grail Program Impact', tab_id='tab-grail-impact'),
+        ], id='tabs', active_tab='tab-overview', className="justify-content-center"), width=12)
+    ]),
     html.Div(id='content', className="p-4")
 ])
 
@@ -49,12 +56,7 @@ def render_content(tab):
         return render_grail_impact()
 
 def render_overview():
-    total_volume = program_data['amount_usd'].sum()
-    
-    # Aggregate data by day to reduce clutter
-    daily_volume = program_data.groupby('date')['amount_usd'].sum().reset_index()
-    volume_over_time = px.line(daily_volume, x='date', y='amount_usd', title='Bridging Volume Over Time')
-    
+    total_volume = program_data['amount_usd'].sum()    
     # Group by direction and calculate sum
     inbound_outbound = program_data.groupby('direction')['amount_usd'].sum().reset_index()
     
@@ -103,11 +105,10 @@ def render_overview():
 
     return html.Div([
         dbc.Row([
-            dbc.Col(html.H2(f"Total Bridged Volume During Program: ${total_volume:,.2f}"), className="mb-4")
+            dbc.Col(html.H2(f"Total Bridged Volume During Program: ${total_volume:,.2f}", style={"color": "#000"}), className="mb-4")
         ]),
         dbc.Row([
-            dbc.Col(dcc.Graph(figure=volume_over_time), width=6, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
-            dbc.Col(dcc.Graph(figure=inbound_outbound_bar), width=6, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
+             dbc.Col(dcc.Graph(figure=inbound_outbound_bar), width=6, className="p-2 mx-auto", style={"border": "1px solid #ddd", "border-radius": "5px"}), 
         ]),
         dbc.Row([
             dbc.Col(dcc.Graph(figure=top_chains_bar), width=6, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
@@ -120,7 +121,6 @@ def render_user_behavior():
     program_inbound_data = df[(df['direction'] == 'inbound') & 
                               (df['block_timestamp'] >= program_start_date) & 
                               (df['block_timestamp'] <= program_end_date)]
-
     # Calculate holding period distribution based on the filtered data
     holding_periods_df = program_inbound_data.groupby('source_address').agg(
         first_bridge_in=('block_timestamp', 'min'),
@@ -135,7 +135,7 @@ def render_user_behavior():
     holding_periods_distribution = px.histogram(
         non_zero_holding_periods_df, 
         x='duration_minutes', 
-        nbins=10, 
+        nbins=30, 
         title='Holding Period Length Distribution (Minutes)'
     )
 
@@ -152,34 +152,36 @@ def render_user_behavior():
     # Group by user and check if they have bridged again after the program period
     user_retention = df_merged.groupby('source_address')['retained_post_program'].any().mean()
 
-   # Cohort Analysis during the program
-    cohort_data = program_data.groupby(['week', 'source_address']).agg({'amount_usd': 'sum'}).reset_index()
-    cohort_pivot = cohort_data.pivot(index='source_address', columns='week', values='amount_usd').fillna(0)
+    # Cohort Analysis during the program
+    cohort_data = program_data.groupby(['date', 'source_address']).agg({'amount_usd': 'sum'}).reset_index()
+    cohort_pivot = cohort_data.pivot(index='source_address', columns='date', values='amount_usd').fillna(0)
     cohort_pivot = cohort_pivot.sum().reset_index()
-    cohort_pivot.columns = ['week', 'amount_usd']
+    cohort_pivot.columns = ['date', 'amount_usd']
 
-    # Calculate week-over-week percentage change
+    # Calculate day-over-day percentage change
     cohort_pivot['pct_change'] = cohort_pivot['amount_usd'].pct_change() * 100
-    cohort_pivot['arrow'] = cohort_pivot['pct_change'].apply(lambda x: '⬆️' if x > 0 else '⬇️')
+    cohort_pivot['arrow'] = cohort_pivot['pct_change'].apply(lambda x: '⬆️' if x > 0 else ('⬇️' if x < 0 else ''))
+
+    # Color coding for percentage changes
+    cohort_pivot['color'] = cohort_pivot['pct_change'].apply(lambda x: 'green' if x > 0 else ('red' if x < 0 else ''))
 
     # Create the bar chart with annotations
     cohort_chart = go.Figure()
     cohort_chart.add_trace(go.Bar(
-        x=cohort_pivot['week'], 
+        x=cohort_pivot['date'], 
         y=cohort_pivot['amount_usd'], 
-        text=cohort_pivot.apply(lambda row: f"{row['pct_change']:.2f}% {row['arrow']}", axis=1),
+        text=cohort_pivot.apply(lambda row: f"<span style='color:{row['color']}'>{row['pct_change']:.2f}% {row['arrow']}</span>" if not pd.isna(row['pct_change']) else f"{row['amount_usd']}", axis=1),
         textposition='outside'
     ))
     cohort_chart.update_layout(
-        title='Weekly Bridging Volume During Program',
-        xaxis_title='Week of Calendar Year',
+        title='Daily Bridging Volume During Program',
+        xaxis_title='Date',
         yaxis_title='Amount (USD)'
     )
 
     return html.Div([
-        html.H3("User Behavior"),
         dbc.Row([
-            dbc.Col(html.H4(f"User Retention Rate Post Program: {user_retention:.2%}"), className="mb-4")
+            dbc.Col(html.H4(f"User Retention Rate Post Program: {user_retention:.2%}", style={"color": "#000"}), className="mb-4")
         ]),
         dbc.Row([
             dbc.Col(dcc.Graph(figure=holding_periods_distribution), width=12, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
@@ -187,6 +189,7 @@ def render_user_behavior():
         dbc.Row([
             dbc.Col(dcc.Graph(figure=cohort_chart), width=12, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
         ]),
+#
     ], style={"padding": "20px", "border": "1px solid #ccc", "border-radius": "10px"})
 
 def render_grail_impact():
@@ -207,13 +210,24 @@ def render_grail_impact():
 
     # Create a DataFrame for the normalized volumes
     program_impact = pd.DataFrame({
-        'Phase': ['Before Program ', 'During Program', 'After Program'],
+        'Phase': ['Before Program', 'During Program', 'After Program'],
         'Volume per Week': [before_volume_per_week, during_volume_per_week, after_volume_per_week]
     })
 
-    # Create the bar chart
-    volume_comparison_chart = px.bar(program_impact, x='Phase', y='Volume per Week', title='Weekly Bridging Volume Comparison')
-    volume_comparison_chart.update_layout(
+    # Calculate week-over-week percentage change
+    program_impact['pct_change_week'] = program_impact['Volume per Week'].pct_change() * 100
+    program_impact['arrow_week'] = program_impact['pct_change_week'].apply(lambda x: '⬆️' if x > 0 else ('⬇️' if x < 0 else ''))
+
+    # Color coding for percentage changes
+    program_impact['color_week'] = program_impact['pct_change_week'].apply(lambda x: 'green' if x > 0 else ('red' if x < 0 else ''))
+
+    # Create the weekly bar chart with annotations
+    volume_comparison_chart_weekly = px.bar(program_impact, x='Phase', y='Volume per Week', title='Weekly Bridging Volume Comparison')
+    volume_comparison_chart_weekly.update_traces(
+        text=program_impact.apply(lambda row: f"<span style='color:{row['color_week']}'>{row['pct_change_week']:.2f}% {row['arrow_week']}</span>" if not pd.isna(row['pct_change_week']) else f"{row['Volume per Week']}", axis=1),
+        textposition='outside'
+    )
+    volume_comparison_chart_weekly.update_layout(
         annotations=[
             dict(
                 x=0, 
@@ -251,14 +265,75 @@ def render_grail_impact():
         ]
     )
 
-    # Placeholder for anomaly detection (implement as needed)
-    anomaly_chart = px.line(df, x='block_timestamp', y='amount_usd', title='Anomaly Detection')
+    # Normalize volume per day
+    before_volume_per_day = before_volume / (before_weeks * 7)
+    during_volume_per_day = during_volume / (during_weeks * 7)
+    after_volume_per_day = after_volume / (after_weeks * 7)
+
+    # Create a DataFrame for the normalized daily volumes
+    program_impact_daily = pd.DataFrame({
+        'Phase': ['Before Program', 'During Program', 'After Program'],
+        'Volume per Day': [before_volume_per_day, during_volume_per_day, after_volume_per_day]
+    })
+
+    # Calculate day-over-day percentage change
+    program_impact_daily['pct_change_day'] = program_impact_daily['Volume per Day'].pct_change() * 100
+    program_impact_daily['arrow_day'] = program_impact_daily['pct_change_day'].apply(lambda x: '⬆️' if x > 0 else ('⬇️' if x < 0 else ''))
+
+    # Color coding for percentage changes
+    program_impact_daily['color_day'] = program_impact_daily['pct_change_day'].apply(lambda x: 'green' if x > 0 else ('red' if x < 0 else ''))
+
+    # Create the daily bar chart with annotations
+    volume_comparison_chart_daily = px.bar(program_impact_daily, x='Phase', y='Volume per Day', title='Daily Bridging Volume Comparison')
+    volume_comparison_chart_daily.update_traces(
+        text=program_impact_daily.apply(lambda row: f"<span style='color:{row['color_day']}'>{row['pct_change_day']:.2f}% {row['arrow_day']}</span>" if not pd.isna(row['pct_change_day']) else f"{row['Volume per Day']}", axis=1),
+        textposition='outside'
+    )
+    volume_comparison_chart_daily.update_layout(
+        annotations=[
+            dict(
+                x=0, 
+                y=before_volume_per_day + 0.5 * before_volume_per_day, 
+                xref="x", 
+                yref="y", 
+                text=f"{before_program_data['block_timestamp'].min().date()} to {program_start_date.date()}", 
+                showarrow=False,
+                yshift=10,
+                font=dict(size=10),
+                align="center"
+            ),
+            dict(
+                x=1, 
+                y=during_volume_per_day + 0.5 * during_volume_per_day, 
+                xref="x", 
+                yref="y", 
+                text=f"{program_start_date.date()} to {program_end_date.date()}", 
+                showarrow=False,
+                yshift=10,
+                font=dict(size=10),
+                align="center"
+            ),
+            dict(
+                x=2, 
+                y=after_volume_per_day + 0.5 * after_volume_per_day, 
+                xref="x", 
+                yref="y", 
+                text=f"{program_end_date.date()} to {after_program_data['block_timestamp'].max().date()}", 
+                showarrow=False,
+                yshift=10,
+                font=dict(size=10),
+                align="center"
+            )
+        ]
+    )
 
     return html.Div([
-        html.H3("Grail Program Impact"),
         dbc.Row([
-            dbc.Col(dcc.Graph(figure=volume_comparison_chart), width=12, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
+            dbc.Col(dcc.Graph(figure=volume_comparison_chart_weekly), width=12, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
         ]),
+        dbc.Row([
+            dbc.Col(dcc.Graph(figure=volume_comparison_chart_daily), width=12, className="p-2", style={"border": "1px solid #ddd", "border-radius": "5px"}),
+        ])
     ], style={"padding": "20px", "border": "1px solid #ccc", "border-radius": "10px"})
 
 # Run the app
